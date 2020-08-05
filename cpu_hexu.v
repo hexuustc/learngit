@@ -20,61 +20,74 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
-module mycpu_top
+module cpu_hexu
     (input [5:0] ext_int,
     input aclk,
 	input aresetn,
 	
-    //axi
-    //ar
-    output reg [3 :0] arid         ,//再判断----------------------
-    output reg [31:0] araddr       ,//再判断----------------------
-    output [3 :0] arlen        ,
-    output reg [2 :0] arsize       ,//再判断----------------------
-    output [1 :0] arburst      ,//有点问题
-    output [1 :0] arlock        ,
-    output [3 :0] arcache      ,
-    output [2 :0] arprot       ,
-    output   reg     arvalid      ,//再判断---------------------
-    input         arready      ,//等着用+++++++++++++++++++++
-    //r           
-    input  [3 :0] rid          ,//等着用+++++++++++++++++++++
-    input  [31:0] rdata        ,//等着用+++++++++++++++++++++
-    input  [1 :0] rresp        ,//无用
-    input         rlast        ,//无用
-    input         rvalid       ,//等着用+++++++++++++++++++++
-    output        rready       ,
-    //aw          
-    output [3 :0] awid         ,//有点问题
-    output reg [31:0] awaddr       ,//再判断---------------------
-    output [3 :0] awlen        ,
-    output reg [2 :0] awsize       ,//再判断---------------------
-    output [1 :0] awburst      ,//有点问题
-    output [1 :0] awlock       ,
-    output [3 :0] awcache      ,
-    output [2 :0] awprot       ,
-    output   reg     awvalid      ,//再判断---------------------
-    input         awready      ,//等着用+++++++++++++++++++++
-    //w          
-    output [3 :0] wid          ,//有点问题
-    output reg [31:0] wdata        ,//再判断---------------------
-    output reg [3 :0] wstrb        ,//再判断---------------------
-    output        wlast        ,
-    output   reg     wvalid       ,//再判断---------------------
-    input         wready       ,//等着用+++++++++++++++++++++
-    //b           
-    input  [3 :0] bid          ,//无用
-    input  [1 :0] bresp        ,//无用
-    input         bvalid       ,//等着用+++++++++++++++++++++
-    output        bready       ,
-
+	output reg [31:0] i_addr  ,     
+    input [31:0] i_read_data  ,
+    output reg i_req      ,  
+    input i_ok        , 
+    
+    output reg [31:0] d_write_data ,
+    output reg [31:0] d_addr       ,
+    input [31:0] d_read_data  ,
+    output reg d_req        ,
+    output reg d_wreq       ,
+    output reg [3:0] d_wbyte      ,
+    input d_ok         ,
+    
     output [31:0] debug_wb_pc,
 	output [3:0] debug_wb_rf_wen,
 	output [4:0] debug_wb_rf_wnum,
 	output [31:0] debug_wb_rf_wdata
-    
-    
+	
     );
+    
+//axi
+//ar
+reg [3 :0] arid         ;//再判断----------------------
+reg [31:0] araddr       ;//再判断----------------------
+wire[3 :0] arlen        ;
+reg [2 :0] arsize       ;//再判断----------------------
+wire[1 :0] arburst      ;//有点问题
+wire[1 :0] arlock        ;
+wire[3 :0] arcache      ;
+wire[2 :0] arprot       ;
+reg     arvalid      ;//再判断---------------------
+wire arready      ;//等着用+++++++++++++++++++++
+    //r           
+wire [3 :0] rid          ;//等着用+++++++++++++++++++++
+wire [31:0] rdata        ;//等着用+++++++++++++++++++++
+wire [1 :0] rresp        ;//无用
+wire rlast        ;//无用
+wire rvalid       ;//等着用+++++++++++++++++++++
+wire rready       ;
+    //aw          
+wire [3 :0] awid         ;//有点问题
+reg [31:0] awaddr       ;//再判断---------------------
+wire [3 :0] awlen        ;
+reg [2 :0] awsize       ;//再判断---------------------
+wire [1 :0] awburst      ;//有点问题
+wire [1 :0] awlock       ;
+wire [3 :0] awcache      ;
+wire [2 :0] awprot       ;
+reg     awvalid      ;//再判断---------------------
+wire awready      ;//等着用+++++++++++++++++++++
+    //w          
+wire [3 :0] wid          ;//有点问题
+reg [31:0] wdata        ;//再判断---------------------
+reg [3 :0] wstrb        ;//再判断---------------------
+wire wlast        ;
+reg     wvalid       ;//再判断---------------------
+wire wready       ;//等着用+++++++++++++++++++++
+    //b           
+wire [3 :0] bid          ;//无用
+wire [1 :0] bresp        ;//无用
+wire bvalid       ;//等着用+++++++++++++++++++++
+wire bready       ;
+
     
 wire inst_sram_en;
 wire [3:0] inst_sram_wen;
@@ -287,6 +300,7 @@ initial delay_hl=0;
 initial delay_hl1=1;
 initial delay_sendhl=0;
 initial r_stall=0;
+
 
 //////////////////////////////////////////////////////
 ////////////////流水段之间寄存器传递部分////////////////
@@ -747,9 +761,11 @@ begin
 end*/
 wire [31:0] inst_addr;
 reg busy_r,busy_w;
+reg busy_i,busy_d;
 reg rok,awok,wok,bok,tok;
+reg rrok,bbok,ttok;
 reg stallr,stallw,stallrw;
-wire va3_r,va3_w;
+wire va3_r,va3_w,va3_rw;
 reg [4:0] rstate,wstate;
 
 
@@ -761,11 +777,263 @@ end
 assign inst_addr={{3{zero}},inst_sram_addr[28:0]};
 assign va3_r=va3&&(inscode3>=47)&&(inscode3<=51);
 assign va3_w=va3&&((inscode3==52)||(inscode3==53)||(inscode3==54));
+assign va3_rw=va3_r||va3_w;
 
 always@(*)
 begin
-    if(bok&&tok) stallrw=0;
+    if(bbok&&ttok) stallrw=0;
     else stallrw=1;
+end
+
+always@(*)
+begin
+    if(va&&~ttok&&~busy_i) i_req=1;
+        else i_req=0;
+end
+
+always@(*)
+begin
+    if(~aresetn)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+    else if(va&&i_ok&&~ttok&&busy_i)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+        inst_sram_rdata=i_read_data;
+    end
+    else if(va&&~ttok&&~busy_i&&i_ok)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=1;
+        inst_sram_rdata=i_read_data;
+    end
+    else if(va&&~ttok&&~busy_i&&~i_ok)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=1;
+    end
+    else if(va&&~i_ok&&~ttok&&busy_i)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+    else if(~va)
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+    else 
+    begin
+        i_addr=inst_sram_addr;
+        //i_req=0;
+    end
+end
+
+always@(posedge clk)
+begin
+    if(~aresetn)
+    begin
+        ttok<=0;
+        busy_i<=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        ttok<=0;
+        busy_i<=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        ttok<=1;
+        busy_i<=0;
+    end
+    else if(va&&i_ok&&~ttok&&busy_i)
+    begin
+        ttok<=1;
+        busy_i<=0;
+    end
+    else if(va&&~ttok&&~busy_i&&i_ok)
+    begin
+        ttok<=1;
+        busy_i<=0;
+    end
+    else if(va&&~ttok&&~busy_i&&~i_ok)
+    begin
+        ttok<=0;
+        busy_i<=1;
+    end
+    else if(va&&~i_ok&&~ttok&&busy_i)
+    begin
+        ttok<=0;
+        busy_i<=1;
+    end
+    else if(~va)
+    begin
+        ttok<=1;
+        busy_i<=0;
+    end
+    else 
+    begin
+        ttok<=1;
+        busy_i<=0;
+    end
+end
+
+always@(*)
+begin
+    if(va3_rw&&~bbok&&~busy_d)
+    begin
+        d_req=1;
+        if(va3_r) d_wreq=0;
+        else d_wreq=1;
+    end
+    else
+    begin
+        d_req=0;
+        d_wreq=0;
+    end
+end
+
+always@(*)
+begin
+    if(~aresetn)
+    begin
+        //d_req=0;
+        //d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+        d_addr=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        //d_req=0;
+        //d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        //d_req=0;
+       // d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+    else if(va3_rw&&d_ok&&~bbok&&busy_d)
+    begin
+       // d_req=0;
+       // d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+        data_sram_rdata=d_read_data;
+    end
+    else if(va3_rw&&~bbok&&~busy_d&&d_ok)
+    begin
+       // d_req=1;
+        //if(va3_r) d_wreq=0;
+        //else d_wreq=1;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+        data_sram_rdata=d_read_data;
+    end
+    else if(va3_rw&&~bbok&&~busy_d)
+    begin
+       // d_req=1;
+        //if(va3_r) d_wreq=0;
+      //  else d_wreq=1;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+    else if(va3_rw&&~d_ok&&~bbok&&busy_d)
+    begin
+       // d_req=0;
+       // d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+    else if(~va3_rw)
+    begin
+       // d_req=0;
+       // d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+    else
+    begin
+       // d_req=0;
+      //  d_wreq=0;
+        d_addr=data_sram_addr;
+        d_write_data=data_sram_wdata;
+        d_wbyte=data_sram_wen;
+    end
+end
+
+always@(posedge clk)
+begin
+    if(~aresetn)
+    begin
+        bbok<=0;
+        busy_d<=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        bbok<=0;
+        busy_d<=0;
+    end
+    else if(ttok&&bbok&&~stall_dv)
+    begin
+        bbok<=1;
+        busy_d<=0;
+    end
+    else if(va3_rw&&d_ok&&~bbok&&busy_d)
+    begin
+        bbok<=1;
+        busy_d<=0;
+    end
+    else if(va3_rw&&~bbok&&~busy_d&&d_ok)
+    begin
+        bbok<=1;
+        busy_d<=0;
+    end
+    else if(va3_rw&&~bbok&&~busy_d)
+    begin
+        bbok<=0;
+        busy_d<=1;
+    end
+    else if(va3_rw&&~d_ok&&~bbok&&busy_d)
+    begin
+        bbok<=0;
+        busy_d<=1;
+    end
+    else if(~va3_rw)
+    begin
+        bbok<=1;
+        busy_d<=0;
+    end
+    else
+    begin
+        bbok<=1;
+        busy_d<=0;
+    end
 end
 
 /*always@(*)
@@ -891,7 +1159,7 @@ begin
     end
 end*/
 
-always@(*)
+/*always@(*)
 begin
     
     if(va&&rvalid&&~rok)//读指令返回
@@ -909,7 +1177,7 @@ begin
         inst_sram_rdata=inst_sram_rdata; 
         data_sram_rdata=data_sram_rdata;
     end
-end
+end*/
 
 always@(*)
 begin
@@ -1593,7 +1861,7 @@ begin
     if(delay_hl||delay_hl1||delay_sendhl||stall) pause1=1;
     else pause1=0;
      
-     if(pause1_1) ir1=ir1; else ir1=inst_sram_rdata;
+     if(pause1_1) ir1=ir1; else ir1=inst_sram_rdata1;
      
      if(~resetn) va1=0;
     else if(pause1) va1=va1;
